@@ -1,0 +1,144 @@
+#!/usr/bin/python
+#-*-coding:utf8-*-
+#
+import urllib2, hashlib
+import sys
+from urllib import urlencode
+import logging
+
+logging.basicConfig(level=logging.DEBUG,
+		format='%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s',
+		datefmt='%a, %d %b %Y %H:%M:%S',
+		filename='/var/log/sms_send.log',
+		filemode='a')
+
+
+import time
+class JiuTian(object) :
+    api_base_url = "http://www.aaa.net/xxx/"
+    api_userid   = None
+    api_passwd   = None
+    api_channel  = None
+    timestamp    = None
+
+    # 错误代码说明
+    err_desc = {
+        '-1' : 'param error',
+        '-2' : 'userid or password invalid',
+        '-3' : 'channel id invalid',
+        '-4' : 'mobile number invalid',
+        '-5' : 'message content error',
+        '-6' : 'the balance on your account is insufficient',
+        '-7' : 'bind ip error',
+        '-8' : 'not found signature',
+        '-9' : 'signature invalid',
+        '-10': 'channel suspended',
+        '-11': 'the specifies time prohibit send',
+        '-12': 'timestamp invalid',
+    }
+
+
+    # 设置用户帐号
+    def set_account(self, userid, passwd, channel='15589') :
+        self.timestamp  = str(int(time.time()))
+
+        # 设置用户ID
+        self.api_userid = userid
+
+        # 设置加密后的密码
+        password = '%s_%s_topsky' % (passwd, self.timestamp)
+        h = hashlib.md5()
+        h.update(password)
+        self.api_passwd = h.hexdigest()
+
+        # 设置使用的通道
+        self.api_channel = channel
+        return
+
+
+    # 接口调用方法
+    def _call_api(self, phrase) :
+        # 组合接口地址
+        joinchar  = '&' if phrase.find('?') > -1 else '?'
+        url = "%s%s%spassword=%s&timestamp=%s" % (
+            self.api_base_url,
+            phrase,
+            joinchar,
+            self.api_passwd,
+            self.timestamp
+        )
+        #return url
+
+        # 取得接口信息
+        f = urllib2.urlopen(url)
+        raw = f.read()
+        f.close()
+        return raw.strip()
+
+
+    # 获取帐号状态
+    def get_account_status(self) :
+        phrase = "sms_ye.php?userid=%s" % self.api_userid
+        result = self._call_api(phrase)
+
+        # 分解返回数据
+        (status, value) = result.split(':')
+        status = status.strip()
+        value  = value.strip()
+
+        # 返回余额
+        if status == 'success' :
+            balance = '%.2f RMB' % float(value)
+            return balance, None
+
+        # 错误处理
+        if status == 'error' :
+            print '%s: %s' % (value, self.err_desc[value])
+            return False
+
+        # 其它情况处理
+        print 'unknown error (%s)' % result
+        return False
+
+
+    # 发送短信
+    def send_sms(self, mobile, message) :
+        # 转字符为 GBK 编码
+        # message = unicode(message, 'utf8').encode('gbk', 'ignore')
+	msg = u'mobile:{} message:{}'.format(mobile, message.decode('utf-8'))
+        try:
+            message = message.encode('gbk', 'ignore')
+        except:
+            message = message.decode('utf-8', 'ignore').encode('gbk', 'ignore')
+
+        # 生成短语，调用接口
+        phrase = "sms.php?cpid=%s&channelid=%s&tele=%s&%s" % (
+            self.api_userid,
+            self.api_channel,
+            mobile,
+            urlencode({'msg': message})
+        )
+        result = self._call_api(phrase)
+
+        # 分解返回数据
+        (status, value) = result.split(':')
+        status = status.strip()
+        value  = value.strip()
+
+        # 发送成功处理
+        if status == 'success': 
+            logging.info(u'{} result: success'.format(msg))
+
+        # 发送失败处理
+        elif status == 'error':
+            logging.error(u'{} error: {}({})'.format(msg, value, self.err_desc[value]))
+        else:
+            logging.error(u'{} error: unknown({})'.format(msg, result))
+
+
+if __name__ == "__main__":
+    s = JiuTian()
+    s.set_account(userid=1234, passwd='123456', channel=123)
+    s.send_sms(sys.argv[1], sys.argv[2])
+
+
